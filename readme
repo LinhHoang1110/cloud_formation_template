@@ -1,0 +1,252 @@
+AWS CloudFormation Cheatsheet
+
+1. Cấu trúc cơ bản của Template
+   CloudFormation template được viết bằng JSON hoặc YAML, bao gồm các phần chính:
+
+AWSTemplateFormatVersion: Phiên bản định dạng template (thường là 2010-09-09).
+Description: Mô tả template.
+Parameters: Tham số đầu vào từ người dùng.
+Mappings: Ánh xạ giá trị (dùng để chọn giá trị theo vùng, môi trường, v.v.).
+Conditions: Điều kiện để tạo tài nguyên (dùng if logic).
+Resources: Tài nguyên AWS cần tạo (bắt buộc).
+Outputs: Giá trị trả về sau khi tạo stack (ví dụ: URL, ID).
+
+Ví dụ cơ bản (YAML):
+AWSTemplateFormatVersion: 2010-09-09
+Description: A simple CloudFormation template
+Parameters:
+InstanceType:
+Type: String
+Default: t2.micro
+Resources:
+MyEC2Instance:
+Type: AWS::EC2::Instance
+Properties:
+InstanceType: !Ref InstanceType
+ImageId: ami-12345678
+Outputs:
+InstanceId:
+Value: !Ref MyEC2Instance
+
+2. Các hàm nội tại (Intrinsic Functions)
+
+Hàm
+Mô tả
+Ví dụ
+
+!Ref
+Tham chiếu đến tài nguyên hoặc tham số.
+!Ref MyEC2Instance
+
+!GetAtt
+Lấy thuộc tính của tài nguyên.
+!GetAtt MyEC2Instance.PublicIp
+
+!Sub
+Thay thế biến trong chuỗi.
+!Sub "http://${MyEC2Instance.PublicDnsName}"
+
+!Join
+Nối các giá trị thành chuỗi.
+!Join [":", ["a", "b"]] → a:b
+
+!Select
+Chọn một phần tử từ danh sách.
+!Select [0, ["us-east-1a", "us-east-1b"]] → us-east-1a
+
+!FindInMap
+Tìm giá trị trong Mapping.
+!FindInMap [RegionMap, !Ref "AWS::Region", AMI]
+
+!GetAZs
+Lấy danh sách Availability Zones.
+!GetAZs "" → ["us-east-1a", "us-east-1b", ...]
+
+!Base64
+Mã hóa chuỗi thành Base64 (dùng cho UserData).
+UserData: !Base64 "yum update -y"
+
+3. Các loại tài nguyên phổ biến
+   3.1. VPC và Network
+
+VPC:VPC:
+Type: AWS::EC2::VPC
+Properties:
+CidrBlock: 10.0.0.0/16
+EnableDnsSupport: true
+EnableDnsHostnames: true
+
+Subnet:Subnet:
+Type: AWS::EC2::Subnet
+Properties:
+VpcId: !Ref VPC
+CidrBlock: 10.0.1.0/24
+AvailabilityZone: !Select [0, !GetAZs ""]
+MapPublicIpOnLaunch: true
+
+Internet Gateway:InternetGateway:
+Type: AWS::EC2::InternetGateway
+AttachGateway:
+Type: AWS::EC2::VPCGatewayAttachment
+Properties:
+VpcId: !Ref VPC
+InternetGatewayId: !Ref InternetGateway
+
+Route Table:RouteTable:
+Type: AWS::EC2::RouteTable
+Properties:
+VpcId: !Ref VPC
+Route:
+Type: AWS::EC2::Route
+Properties:
+RouteTableId: !Ref RouteTable
+DestinationCidrBlock: 0.0.0.0/0
+GatewayId: !Ref InternetGateway
+
+NAT Gateway:ElasticIP:
+Type: AWS::EC2::EIP
+Properties:
+Domain: vpc
+NATGateway:
+Type: AWS::EC2::NatGateway
+Properties:
+AllocationId: !GetAtt ElasticIP.AllocationId
+SubnetId: !Ref PublicSubnet
+
+3.2. EC2
+
+EC2 Instance:EC2Instance:
+Type: AWS::EC2::Instance
+Properties:
+ImageId: ami-12345678
+InstanceType: t2.micro
+SubnetId: !Ref Subnet
+SecurityGroupIds: - !Ref SecurityGroup
+KeyName: my-key-pair
+UserData:
+Fn::Base64: |
+#!/bin/bash
+yum update -y
+yum install -y httpd
+systemctl start httpd
+
+Security Group:SecurityGroup:
+Type: AWS::EC2::SecurityGroup
+Properties:
+GroupDescription: Allow HTTP and SSH
+VpcId: !Ref VPC
+SecurityGroupIngress: - IpProtocol: tcp
+FromPort: 80
+ToPort: 80
+CidrIp: 0.0.0.0/0 - IpProtocol: tcp
+FromPort: 22
+ToPort: 22
+CidrIp: 0.0.0.0/0
+
+3.3. Application Load Balancer (ALB)
+
+ALB:ApplicationLoadBalancer:
+Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+Properties:
+Scheme: internet-facing
+Subnets: - !Ref PublicSubnet1 - !Ref PublicSubnet2
+SecurityGroups: - !Ref SecurityGroup
+
+Target Group:TargetGroup:
+Type: AWS::ElasticLoadBalancingV2::TargetGroup
+Properties:
+Port: 80
+Protocol: HTTP
+VpcId: !Ref VPC
+Targets: - Id: !Ref EC2Instance
+Port: 80
+
+Listener:ALBListener:
+Type: AWS::ElasticLoadBalancingV2::Listener
+Properties:
+LoadBalancerArn: !Ref ApplicationLoadBalancer
+Port: 80
+Protocol: HTTP
+DefaultActions: - Type: forward
+TargetGroupArn: !Ref TargetGroup
+
+3.4. S3
+
+S3 Bucket:S3Bucket:
+Type: AWS::S3::Bucket
+Properties:
+BucketName: my-unique-bucket-name
+AccessControl: Private
+
+4. Parameters và Mappings
+   Parameters
+
+Định nghĩa tham số đầu vào:Parameters:
+InstanceType:
+Type: String
+Default: t2.micro
+AllowedValues: [t2.micro, t3.micro]
+
+Sử dụng tham số:InstanceType: !Ref InstanceType
+
+Mappings
+
+Định nghĩa ánh xạ (ví dụ: chọn AMI theo vùng):Mappings:
+RegionMap:
+us-east-1:
+AMI: ami-12345678
+us-west-2:
+AMI: ami-87654321
+
+Sử dụng ánh xạ:ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
+
+5. Conditions
+
+Định nghĩa điều kiện:Conditions:
+CreateProdResources: !Equals [!Ref Environment, "prod"]
+
+Sử dụng điều kiện trong tài nguyên:MyEC2Instance:
+Type: AWS::EC2::Instance
+Condition: CreateProdResources
+Properties:
+InstanceType: t2.micro
+ImageId: ami-12345678
+
+6. Outputs
+
+Xuất giá trị sau khi tạo stack:Outputs:
+WebsiteURL:
+Description: URL of the web server
+Value: !Sub "http://${EC2Instance.PublicDnsName}"
+
+7. Một số mẹo và lưu ý
+
+Pseudo Parameters:
+AWS::Region: Vùng hiện tại (ví dụ: us-east-1).
+AWS::AccountId: ID tài khoản AWS.
+AWS::StackName: Tên stack.
+Ví dụ: !Sub "arn:aws:s3:::${AWS::AccountId}-bucket".
+
+Nested Stacks: Dùng để chia nhỏ template phức tạp:NestedStack:
+Type: AWS::CloudFormation::Stack
+Properties:
+TemplateURL: https://s3.amazonaws.com/my-bucket/nested-template.yaml
+
+Chi phí: CloudFormation miễn phí, nhưng bạn trả phí cho tài nguyên được tạo.
+Debug: Nếu stack thất bại, kiểm tra tab Events trong CloudFormation Console để xem lỗi.
+
+8. Các lệnh AWS CLI hữu ích
+
+Tạo stack:aws cloudformation create-stack --stack-name MyStack --template-body file://template.yaml --parameters ParameterKey=KeyName,ParameterValue=my-key-pair
+
+Cập nhật stack:aws cloudformation update-stack --stack-name MyStack --template-body file://template.yaml
+
+Xóa stack:aws cloudformation delete-stack --stack-name MyStack
+
+Xem trạng thái stack:aws cloudformation describe-stacks --stack-name MyStack
+
+9. Tài nguyên tham khảo
+
+Tài liệu chính thức: AWS CloudFormation User Guide
+Danh sách tài nguyên: AWS Resource Types
+Mẫu template: AWS Sample Templates
